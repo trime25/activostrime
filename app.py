@@ -6,14 +6,13 @@ import plotly.express as px
 from datetime import datetime
 
 # --- CONFIGURACIÓN ---
-# 1. Se añade initial_sidebar_state="collapsed" para que el menú se oculte solo en móviles/web
+# initial_sidebar_state="collapsed" asegura que el menú no estorbe al cargar
 st.set_page_config(
     page_title="SISTEMA DE GESTIÓN INDUSTRIAL", 
     layout="wide", 
     initial_sidebar_state="collapsed" 
 )
 
-# Carpeta para imágenes (Se eliminó la de QR)
 if not os.path.exists('imagenes_activos'): 
     os.makedirs('imagenes_activos')
 
@@ -24,18 +23,14 @@ def conectar_db():
 def inicializar_db():
     with conectar_db() as conn:
         c = conn.cursor()
-        # Se eliminó la columna qr_path
         c.execute('''CREATE TABLE IF NOT EXISTS activos (
                         id TEXT PRIMARY KEY, nombre TEXT, descripcion TEXT, 
                         ubicacion TEXT, ultima_revision DATE, imagen_path TEXT, 
                         estado TEXT, modelo TEXT, marca TEXT, motivo_estado TEXT)''')
-        
         c.execute('''CREATE TABLE IF NOT EXISTS historial (
                         id_activo TEXT, origen TEXT, destino TEXT, 
                         fecha TIMESTAMP, motivo TEXT)''')
-        
         c.execute('''CREATE TABLE IF NOT EXISTS ubicaciones (nombre TEXT PRIMARY KEY)''')
-        
         c.execute('''CREATE TABLE IF NOT EXISTS activos_eliminados (
                         id TEXT, nombre TEXT, ubicacion TEXT, 
                         fecha_eliminacion TIMESTAMP, motivo TEXT)''')
@@ -133,6 +128,8 @@ if menu == "DASHBOARD":
                         if st.button("🔍 ZOOM", key=f"z_{row['id']}"): mostrar_zoom(row['imagen_path'], row['nombre'])
                 
                 with c_info:
+                    # 4. Mostrar el estado en el Dashboard
+                    st.write(f"**ESTADO:** {row['estado']}")
                     st.write(f"**MARCA:** {row['marca'] or 'N/A'} | **MODELO:** {row['modelo'] or 'N/A'}")
                     st.write(f"**UBICACIÓN:** {row['ubicacion']}")
                     if row['estado'] in ["DAÑADO", "REPARACION"]:
@@ -147,7 +144,7 @@ if menu == "DASHBOARD":
                         confirmar_eliminacion(row)
 
 # ==========================================
-# REGISTRAR ACTIVO (QR ELIMINADO)
+# REGISTRAR ACTIVO
 # ==========================================
 elif menu == "REGISTRAR ACTIVO":
     st.title("📝 REGISTRO DE ACTIVO")
@@ -168,32 +165,73 @@ elif menu == "REGISTRAR ACTIVO":
         desc_reg = st.text_area("DESCRIPCIÓN").upper()
         foto_reg = st.file_uploader("FOTO")
         
+        # 2. Mantener el mensaje de éxito
         if st.button("💾 GUARDAR ACTIVO", use_container_width=True):
             if id_a and nom and ubi_reg:
                 with conectar_db() as conn:
                     check = conn.execute("SELECT id FROM activos WHERE id=?", (id_a,)).fetchone()
-                    if check: st.error("CÓDIGO DUPLICADO")
+                    if check: 
+                        st.error("CÓDIGO DUPLICADO")
                     else:
                         img_p = f"imagenes_activos/{id_a}.png" if foto_reg else ""
                         if foto_reg:
                             with open(img_p, "wb") as f: f.write(foto_reg.getbuffer())
                         
-                        # Inserción sin QR_PATH (10 columnas ahora)
                         conn.execute("""INSERT INTO activos (id, nombre, descripcion, ubicacion, ultima_revision, imagen_path, estado, modelo, marca, motivo_estado) 
                                      VALUES (?,?,?,?,?,?,?,?,?,?)""",
                             (id_a, nom, desc_reg, ubi_reg, datetime.now().date(), img_p, est_reg, modelo_reg, marca_reg, motivo_reg))
                         conn.commit()
-                        st.success("GUARDADO")
+                        st.success(f"✅ ACTIVO {id_a} REGISTRADO CORRECTAMENTE")
+                        # No hacemos st.rerun() para que el mensaje no desaparezca
+            else: 
+                st.warning("CAMPOS OBLIGATORIOS FALTANTES")
+
+# ==========================================
+# GESTIONAR UBICACIONES
+# ==========================================
+elif menu == "GESTIONAR UBICACIONES":
+    st.title("📍 UBICACIONES")
+    nueva = st.text_input("NUEVA UBICACIÓN").upper()
+    if st.button("AÑADIR"):
+        if nueva:
+            with conectar_db() as conn:
+                try: 
+                    conn.execute("INSERT INTO ubicaciones VALUES (?)", (nueva,))
+                    conn.commit()
+                    st.success("AÑADIDA")
+                except: st.error("EXISTE")
+            st.rerun()
+    
+    st.markdown("---")
+    # 3. Mostrar registros en un cuadro
+    with st.container(border=True):
+        st.subheader("UBICACIONES REGISTRADAS")
+        with conectar_db() as conn:
+            df_u = pd.read_sql_query("SELECT * FROM ubicaciones", conn)
+            if df_u.empty:
+                st.info("No hay ubicaciones registradas.")
+            else:
+                for _, u in df_u.iterrows():
+                    col1, col2 = st.columns([4,1])
+                    col1.write(f"• {u['nombre']}")
+                    if col2.button("BORRAR", key=u['nombre']):
+                        with conectar_db() as conn:
+                            conn.execute("DELETE FROM ubicaciones WHERE nombre=?", (u['nombre'],))
+                            conn.commit()
                         st.rerun()
 
-# --- HISTORIAL ELIMINADOS (ORDEN DESCENDENTE) ---
+# ==========================================
+# HISTORIAL ELIMINADOS
+# ==========================================
 elif menu == "HISTORIAL ELIMINADOS":
     st.title("🗑️ ELIMINADOS")
     with conectar_db() as conn:
         df_el = pd.read_sql_query("SELECT * FROM activos_eliminados ORDER BY fecha_eliminacion DESC", conn)
     st.dataframe(df_el, use_container_width=True)
 
-# --- LAS SECCIONES TRASLADOS, UBICACIONES Y ESTADÍSTICAS SE MANTIENEN ---
+# ==========================================
+# ESTADÍSTICAS Y TRASLADOS
+# ==========================================
 elif menu == "TRASLADOS":
     st.title("🚚 MOVIMIENTOS")
     with conectar_db() as conn:
@@ -213,29 +251,11 @@ elif menu == "TRASLADOS":
                     conn.execute("UPDATE activos SET ubicacion=? WHERE id=?", (u_dest, id_sel))
                     conn.execute("INSERT INTO historial VALUES (?,?,?,?,?)", (id_sel, u_orig, u_dest, datetime.now(), mot))
                     conn.commit()
+                st.success("TRASLADO EXITOSO")
                 st.rerun()
     st.subheader("📜 HISTORIAL")
     with conectar_db() as conn:
         st.dataframe(pd.read_sql_query("SELECT * FROM historial ORDER BY fecha DESC", conn), use_container_width=True)
-
-elif menu == "GESTIONAR UBICACIONES":
-    st.title("📍 UBICACIONES")
-    nueva = st.text_input("NUEVA UBICACIÓN").upper()
-    if st.button("AÑADIR"):
-        if nueva:
-            with conectar_db() as conn:
-                try: conn.execute("INSERT INTO ubicaciones VALUES (?)", (nueva,)); conn.commit()
-                except: st.error("EXISTE")
-            st.rerun()
-    with conectar_db() as conn:
-        for _, u in pd.read_sql_query("SELECT * FROM ubicaciones", conn).iterrows():
-            col1, col2 = st.columns([4,1])
-            col1.write(f"• {u['nombre']}")
-            if col2.button("BORRAR", key=u['nombre']):
-                with conectar_db() as conn:
-                    conn.execute("DELETE FROM ubicaciones WHERE nombre=?", (u['nombre'],))
-                    conn.commit()
-                st.rerun()
 
 elif menu == "ESTADÍSTICAS":
     st.title("📊 ESTADÍSTICAS")
@@ -246,4 +266,6 @@ elif menu == "ESTADÍSTICAS":
         c1.metric("OPERATIVOS", len(df[df['estado'] == 'OPERATIVO']))
         c2.metric("DAÑADOS", len(df[df['estado'] == 'DAÑADO']))
         c3.metric("REPARACIÓN", len(df[df['estado'] == 'REPARACION']))
-        fig = px.pie(df, names='estado', color='estado', color_discrete_map={'OPERATIVO':'#28a745','DAÑADO':'#dc3545','REPARACION':'#ffc107'})
+        fig = px.pie(df, names='estado', color='estado', 
+                     color_discrete_map={'OPERATIVO':'#28a745','DAÑADO':'#dc3545','REPARACION':'#ffc107'})
+        st.plotly_chart(fig)
