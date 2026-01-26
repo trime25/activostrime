@@ -1,7 +1,6 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
-import qrcode
 import os
 import plotly.express as px 
 from datetime import datetime
@@ -282,4 +281,5 @@ elif menu == "ESTADÍSTICAS":
         c2.metric("DAÑADOS", len(df[df['estado'] == 'DAÑADO']))
         c3.metric("REPARACIÓN", len(df[df['estado'] == 'REPARACION']))
         fig = px.pie(df, names='estado', color='estado', color_discrete_map={'OPERATIVO':'#28a745','DAÑADO':'#dc3545','REPARACION':'#ffc107'})
+
         st.plotly_chart(fig)
