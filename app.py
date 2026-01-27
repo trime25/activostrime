@@ -245,6 +245,7 @@ elif menu == "REGISTRAR ACTIVO":
         ubis = pd.read_sql_query("SELECT nombre FROM ubicaciones", conn)['nombre'].tolist()
     
     with st.container(border=True):
+        if not ubis: st.warning("Cree una ubicación antes de registrar un activo.")
         rid = st.text_input("ID ACTIVO*").upper()
         c_p1, c_p2 = st.columns(2)
         rcat = c_p1.selectbox("CATEGORÍA*", CATEGORIAS_LISTA)
@@ -252,7 +253,7 @@ elif menu == "REGISTRAR ACTIVO":
         c1, c2 = st.columns(2)
         rmarc = c1.text_input("MARCA").upper()
         rmod = c2.text_input("MODELO").upper()
-        rubi = c1.selectbox("UBICACIÓN", ubis) if ubis else st.warning("Cree una ubicación")
+        rubi = c1.selectbox("UBICACIÓN", ubis) 
         rest = c2.selectbox("ESTADO", ["OPERATIVO", "DAÑADO", "REPARACION"])
         rmot = st.text_input("MOTIVO DE TRASLADO / DAÑO*").upper() if rest in ["DAÑADO", "REPARACION"] else ""
         rdesc = st.text_area("DESCRIPCIÓN").upper()
