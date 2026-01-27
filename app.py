@@ -245,7 +245,7 @@ elif menu == "REGISTRAR ACTIVO":
         ubis = pd.read_sql_query("SELECT nombre FROM ubicaciones", conn)['nombre'].tolist()
     
     with st.container(border=True):
-        if not ubis: st.warning("Cree una ubicación antes de registrar un activo.")
+        if not ubis: st.warning("DEBE CREEAR UNA UBICACION PRIMERO.")
         rid = st.text_input("ID ACTIVO*").upper()
         c_p1, c_p2 = st.columns(2)
         rcat = c_p1.selectbox("CATEGORÍA*", CATEGORIAS_LISTA)
@@ -319,6 +319,7 @@ elif menu == "HISTORIAL ELIMINADOS":
     st.title("🗑️ ACTIVOS ELIMINADOS")
     with conectar_db() as conn:
         st.dataframe(pd.read_sql_query("SELECT * FROM activos_eliminados ORDER BY fecha_eliminacion DESC", conn), use_container_width=True)
+
 
 
 
