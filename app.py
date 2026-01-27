@@ -132,7 +132,7 @@ if menu == "DASHBOARD":
     c_res1.metric("TOTAL GLOBAL", len(df_f))
     c_res2.metric("VENEZUELA 🇻🇪", len(df_f[df_f['pais'] == "VENEZUELA"]))
     c_res3.metric("COLOMBIA 🇨🇴", len(df_f[df_f['pais'] == "COLOMBIA"]))
-    c_res4.metric("EE.UU. 🇺🇸", len(df_f[df_f['pais'] == "ESTADOS UNIDOS"]))
+    c_res4.metric("ESTADOS UNIDOS 🇺🇸", len(df_f[df_f['pais'] == "ESTADOS UNIDOS"]))
     st.divider()
 
     # --- SECCIONES POR PAÍS ---
@@ -318,6 +318,7 @@ elif menu == "HISTORIAL ELIMINADOS":
     st.title("🗑️ ACTIVOS ELIMINADOS")
     with conectar_db() as conn:
         st.dataframe(pd.read_sql_query("SELECT * FROM activos_eliminados ORDER BY fecha_eliminacion DESC", conn), use_container_width=True)
+
 
 
 
