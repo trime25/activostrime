@@ -108,7 +108,7 @@ menu = st.sidebar.radio("MENÚ PRINCIPAL", ["DASHBOARD", "REGISTRAR ACTIVO", "TR
 # DASHBOARD
 # ==========================================
 if menu == "DASHBOARD":
-    st.title("📊 PANEL DE ACTIVOS")
+    st.title("📊 ACTIVOS")
     with conectar_db() as conn:
         df = pd.read_sql_query("SELECT * FROM activos", conn)
         ubis = pd.read_sql_query("SELECT nombre FROM ubicaciones", conn)['nombre'].tolist()
@@ -318,6 +318,7 @@ elif menu == "HISTORIAL ELIMINADOS":
     st.title("🗑️ ACTIVOS ELIMINADOS")
     with conectar_db() as conn:
         st.dataframe(pd.read_sql_query("SELECT * FROM activos_eliminados ORDER BY fecha_eliminacion DESC", conn), use_container_width=True)
+
 
 
 
