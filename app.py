@@ -103,7 +103,7 @@ menu = st.sidebar.radio("MENÚ PRINCIPAL", ["DASHBOARD", "REGISTRAR ACTIVO", "TR
 # DASHBOARD
 # ==========================================
 if menu == "DASHBOARD":
-    st.title("🚗🛻🚑 DASHBOARD DE ACTIVOS")
+    st.title("📊 DASHBOARD DE ACTIVOS")
     with conectar_db() as conn:
         df = pd.read_sql_query("SELECT * FROM activos", conn)
         ubis = pd.read_sql_query("SELECT nombre FROM ubicaciones", conn)['nombre'].tolist()
@@ -186,8 +186,8 @@ if menu == "DASHBOARD":
                         idx = st.session_state.get(f"idx_{row['id']}", 0)
                         st.image(fotos[idx % len(fotos)], use_container_width=True)
                         ca, cb = st.columns(2)
-                        if ca.button("⬅️", key=f"p_{row['id']}"): st.session_state[f"idx_{row['id']}"] = idx - 1; st.rerun()
-                        if cb.button("➡️", key=f"n_{row['id']}"): st.session_state[f"idx_{row['id']}"] = idx + 1; st.rerun()
+                        if ca.button("⬅︎", key=f"p_{row['id']}"): st.session_state[f"idx_{row['id']}"] = idx - 1; st.rerun()
+                        if cb.button("➡︎", key=f"n_{row['id']}"): st.session_state[f"idx_{row['id']}"] = idx + 1; st.rerun()
                     else:
                         st.info("Sin fotos registradas.")
 
@@ -318,6 +318,7 @@ elif menu == "HISTORIAL ELIMINADOS":
     st.title("🗑️ ACTIVOS ELIMINADOS")
     with conectar_db() as conn:
         st.dataframe(pd.read_sql_query("SELECT * FROM activos_eliminados ORDER BY fecha_eliminacion DESC", conn), use_container_width=True)
+
 
 
 
