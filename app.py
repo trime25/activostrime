@@ -8,7 +8,6 @@ from datetime import datetime
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="SISTEMA GESTIÓN TRIMECA", layout="wide", initial_sidebar_state="collapsed")
 
-# Crear carpetas si no existen
 for carpeta in ['fotos_activos', 'docs_activos']:
     if not os.path.exists(carpeta): os.makedirs(carpeta)
 
@@ -25,14 +24,18 @@ def inicializar_db():
                         marca TEXT, motivo_estado TEXT, categoria TEXT, pais TEXT)''')
         
         for col in [("categoria", "TEXT"), ("pais", "TEXT")]:
-            try:
-                c.execute(f"ALTER TABLE activos ADD COLUMN {col[0]} {col[1]}")
-            except sqlite3.OperationalError:
-                pass
+            try: c.execute(f"ALTER TABLE activos ADD COLUMN {col[0]} {col[1]}")
+            except sqlite3.OperationalError: pass
+
+        # Definición de Clave Primaria Compuesta: (nombre, pais)
+        c.execute('''CREATE TABLE IF NOT EXISTS ubicaciones (
+                        nombre TEXT, 
+                        pais TEXT, 
+                        PRIMARY KEY (nombre, pais))''')
+        conn.commit()
 
         c.execute('''CREATE TABLE IF NOT EXISTS fotos (id_activo TEXT, path TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS documentos (id_activo TEXT, path TEXT, nombre_real TEXT)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS ubicaciones (nombre TEXT PRIMARY KEY)''')
         c.execute('''CREATE TABLE IF NOT EXISTS historial (id_activo TEXT, origen TEXT, destino TEXT, fecha TIMESTAMP, motivo TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS activos_eliminados (id TEXT, ubicacion TEXT, fecha_eliminacion TIMESTAMP, motivo TEXT)''')
         conn.commit()
@@ -58,10 +61,8 @@ def guardar_archivos(id_activo, archivos, tipo):
             ext = os.path.splitext(arc.name)[1]
             ruta = os.path.join(carpeta, f"{id_activo}_{idx}_{timestamp}{ext}")
             with open(ruta, "wb") as f: f.write(arc.getbuffer())
-            if tipo == 'foto': 
-                conn.execute("INSERT INTO fotos (id_activo, path) VALUES (?,?)", (id_activo, ruta))
-            else: 
-                conn.execute("INSERT INTO documentos (id_activo, path, nombre_real) VALUES (?,?,?)", (id_activo, ruta, arc.name))
+            if tipo == 'foto': conn.execute("INSERT INTO fotos (id_activo, path) VALUES (?,?)", (id_activo, ruta))
+            else: conn.execute("INSERT INTO documentos (id_activo, path, nombre_real) VALUES (?,?,?)", (id_activo, ruta, arc.name))
         conn.commit()
 
 # --- DIÁLOGOS ---
@@ -70,39 +71,33 @@ def visor_documento(path, nombre):
     st.write(f"### {nombre}")
     if path.lower().endswith('.pdf'): display_pdf(path)
     else: st.info("Vista previa solo disponible para archivos PDF.")
-    with open(path, "rb") as f: 
-        st.download_button("📥 DESCARGAR", f, file_name=nombre, key=f"dl_{path}")
+    with open(path, "rb") as f: st.download_button("📥 DESCARGAR", f, file_name=nombre, key=f"dl_{path}")
 
 @st.dialog("CONFIRMAR ELIMINACIÓN DE ACTIVO")
 def confirmar_eliminar_activo(activo_id):
-    st.error(f"⚠️ ¿Está seguro de que desea eliminar permanentemente el activo **{activo_id}**?")
-    if st.button("SÍ, ELIMINAR AHORA", use_container_width=True, key=f"conf_del_{activo_id}"):
+    st.error(f"⚠️ ¿Desea eliminar permanentemente el activo **{activo_id}**?")
+    if st.button("SÍ, ELIMINAR", use_container_width=True):
         with conectar_db() as conn:
             res = conn.execute("SELECT ubicacion FROM activos WHERE id=?", (activo_id,)).fetchone()
             ubi_act = res[0] if res else "DESCONOCIDA"
-            conn.execute("""
-                INSERT INTO activos_eliminados (id, ubicacion, fecha_eliminacion, motivo) 
-                VALUES (?, ?, ?, ?)
-            """, (activo_id, ubi_act, datetime.now(), "ELIMINACIÓN MANUAL"))
+            conn.execute("INSERT INTO activos_eliminados (id, ubicacion, fecha_eliminacion, motivo) VALUES (?, ?, ?, ?)", (activo_id, ubi_act, datetime.now(), "ELIMINACIÓN MANUAL"))
             conn.execute("DELETE FROM activos WHERE id=?", (activo_id,))
             conn.execute("DELETE FROM fotos WHERE id_activo=?", (activo_id,))
             conn.execute("DELETE FROM documentos WHERE id_activo=?", (activo_id,))
             conn.commit()
-        st.success("Activo eliminado.")
-        st.rerun()
+        st.success("Activo eliminado."); st.rerun()
 
-@st.dialog("CONFIRMAR ELIMINACIÓN DE UBICACIÓN")
-def confirmar_eliminacion_ubi(nombre_ubi):
-    st.warning(f"¿Está seguro de que desea eliminar la ubicación: **{nombre_ubi}**?")
-    if st.button("SÍ, ELIMINAR UBICACIÓN", key=f"btn_ubi_del_{nombre_ubi}"):
+@st.dialog("ELIMINAR UBICACIÓN")
+def confirmar_eliminacion_ubi(nombre, pais):
+    st.warning(f"¿Eliminar **{nombre}** en **{pais}**?")
+    if st.button("CONFIRMAR"):
         with conectar_db() as conn:
-            conn.execute("DELETE FROM ubicaciones WHERE nombre=?", (nombre_ubi,))
+            conn.execute("DELETE FROM ubicaciones WHERE nombre=? AND pais=?", (nombre, pais))
             conn.commit()
-        st.success("Ubicación eliminada.")
-        st.rerun()
+        st.success("Ubicación eliminada."); st.rerun()
 
 # --- NAVEGACIÓN ---
-menu = st.sidebar.radio("MENÚ PRINCIPAL", ["DASHBOARD", "REGISTRAR ACTIVO", "TRASLADOS", "GESTIONAR UBICACIONES", "HISTORIAL ELIMINADOS"], key="main_menu_radio")
+menu = st.sidebar.radio("MENÚ", ["DASHBOARD", "REGISTRAR ACTIVO", "TRASLADOS", "GESTIONAR UBICACIONES", "HISTORIAL ELIMINADOS"])
 
 if menu == "DASHBOARD":
     st.title("📊 ACTIVOS")
@@ -274,58 +269,70 @@ elif menu == "REGISTRAR ACTIVO":
 elif menu == "TRASLADOS":
     st.title("🚚 TRASLADOS")
     with conectar_db() as conn:
-        activos = pd.read_sql_query("SELECT id, ubicacion FROM activos", conn)
-        ubis = pd.read_sql_query("SELECT nombre FROM ubicaciones", conn)['nombre'].tolist()
+        activos = pd.read_sql_query("SELECT id, ubicacion, pais FROM activos", conn)
+        df_u = pd.read_sql_query("SELECT * FROM ubicaciones", conn)
+    
     if not activos.empty:
-        sel = st.selectbox("SELECCIONE ACTIVO", activos['id'], key="tras_sel_act")
-        u_orig = activos[activos['id'] == sel]['ubicacion'].values[0]
-        st.info(f"📍 UBICACIÓN ACTUAL: **{u_orig}**")
-        u_dest = st.selectbox("SELECCIONE DESTINO", ubis, key="tras_sel_dest")
-        mot = st.text_input("MOTIVO DEL TRASLADO", key="tras_mot").upper()
-        if st.button("EJECUTAR TRASLADO", use_container_width=True):
-            if u_orig != u_dest:
+        sel_id = st.selectbox("SELECCIONE ACTIVO", activos['id'])
+        curr = activos[activos['id'] == sel_id].iloc[0]
+        st.info(f"📍 Actual: {curr['pais']} - {curr['ubicacion']}")
+        
+        ct1, ct2 = st.columns(2)
+        tpais = ct1.selectbox("PAÍS DESTINO", PAISES_LISTA)
+        # Filtrar ubicaciones del país destino
+        u_dest_list = df_u[df_u['pais'] == tpais]['nombre'].tolist()
+        tubi = ct2.selectbox("UBICACIÓN DESTINO", u_dest_list if u_dest_list else ["SIN OPCIONES"])
+        
+        mot = st.text_input("MOTIVO").upper()
+        if st.button("EJECUTAR TRASLADO"):
+            if tubi != "SIN OPCIONES":
                 with conectar_db() as conn:
-                    conn.execute("UPDATE activos SET ubicacion=? WHERE id=?", (u_dest, sel))
-                    conn.execute("INSERT INTO historial VALUES (?,?,?,?,?)", (sel, u_orig, u_dest, datetime.now(), mot))
-                    conn.commit()
-                st.success(f"Activo {sel} trasladado a {u_dest}"); st.rerun()
-            else: st.error("El destino debe ser diferente al origen.")
-    st.write("---")
-    st.write("### HISTORIAL DE MOVIMIENTOS")
-    with conectar_db() as conn:
-        st.dataframe(pd.read_sql_query("SELECT * FROM historial ORDER BY fecha DESC", conn), use_container_width=True)
+                    conn.execute("UPDATE activos SET ubicacion=?, pais=? WHERE id=?", (tubi, tpais, sel_id))
+                    conn.execute("INSERT INTO historial VALUES (?,?,?,?,?)", (sel_id, f"{curr['pais']}-{curr['ubicacion']}", f"{tpais}-{tubi}", datetime.now(), mot))
+                st.success("Traslado realizado."); st.rerun()
 
 elif menu == "GESTIONAR UBICACIONES":
-    st.title("📍 UBICACIONES")
-    nubi = st.text_input("NOMBRE DE NUEVA UBICACIÓN", key="new_ubi_input").upper()
-    if st.button("AÑADIR UBICACIÓN"):
-        if nubi:
-            with conectar_db() as conn:
-                try: 
-                    conn.execute("INSERT INTO ubicaciones VALUES (?)", (nubi,))
-                    conn.commit()
-                    st.success("Añadida")
-                except: st.error("Esta ubicación ya existe.")
-            st.rerun()
+    st.title("📍 GESTIÓN DE UBICACIONES")
+    
     with st.container(border=True):
-        st.subheader("LISTADO REGISTRADO")
-        with conectar_db() as conn:
-            for r in conn.execute("SELECT * FROM ubicaciones").fetchall():
-                c1, c2 = st.columns([4,1])
-                c1.write(f"🏢 {r[0]}")
-                if c2.button("🗑️", key=f"del_ubi_btn_{r[0]}"):
-                    cant = conn.execute("SELECT COUNT(*) FROM activos WHERE ubicacion=?", (r[0],)).fetchone()[0]
+        c_u1, c_u2 = st.columns(2)
+        upais = c_u1.selectbox("PAÍS PARA LA UBICACIÓN", PAISES_LISTA)
+        unombre = c_u2.text_input("NOMBRE DE LA NUEVA UBICACIÓN (Ej: ALMACÉN GENERAL)").upper()
+        
+        if st.button("➕ AÑADIR UBICACIÓN", use_container_width=True):
+            if unombre:
+                with conectar_db() as conn:
+                    try:
+                        # Intentamos insertar la combinación nombre + pais
+                        conn.execute("INSERT INTO ubicaciones (nombre, pais) VALUES (?, ?)", (unombre, upais))
+                        conn.commit()
+                        st.success(f"✅ Registrado: {unombre} en {upais}")
+                        st.rerun()
+                    except sqlite3.IntegrityError:
+                        # Este error solo saltará si el NOMBRE y el PAÍS son idénticos a uno existente
+                        st.error(f"❌ Error: La ubicación '{unombre}' ya existe registrada en {upais}.")
+            else:
+                st.warning("⚠️ Por favor, escribe un nombre para la ubicación.")
+
+    st.divider()
+    st.subheader("Ubicaciones Registradas")
+    with conectar_db() as conn:
+        # Ordenamos para ver agrupado por país y luego nombre
+        ubis_db = conn.execute("SELECT nombre, pais FROM ubicaciones ORDER BY pais ASC, nombre ASC").fetchall()
+        
+        if not ubis_db:
+            st.info("No hay ubicaciones registradas.")
+        else:
+            for u in ubis_db:
+                col1, col2 = st.columns([4, 1])
+                # Mostramos claramente la relación País > Ubicación
+                col1.write(f"🚩 **{u[1]}** ➔ {u[0]}")
+                if col2.button("🗑️", key=f"del_{u[0]}_{u[1]}"):
+                    cant = conn.execute("SELECT COUNT(*) FROM activos WHERE ubicacion=?", (u[0],)).fetchone()[0]
                     if cant > 0: st.error(f"No se puede eliminar: tiene {cant} activo(s) asociados.")
-                    else: confirmar_eliminacion_ubi(r[0])
+                    else: confirmar_eliminacion_ubi(u[0], u[1])
 
 elif menu == "HISTORIAL ELIMINADOS":
-    st.title("🗑️ ACTIVOS ELIMINADOS")
+    st.title("🗑️ ELIMINADOS")
     with conectar_db() as conn:
-        st.dataframe(pd.read_sql_query("SELECT * FROM activos_eliminados ORDER BY fecha_eliminacion DESC", conn), use_container_width=True)
-
-
-
-
-
-
-
+        st.dataframe(pd.read_sql_query("SELECT * FROM activos_eliminados", conn), use_container_width=True)
