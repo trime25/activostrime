@@ -149,7 +149,7 @@ if menu == "DASHBOARD":
     # Solo mostrar información si se ha seleccionado una categoría válida
     if f_cat != "SELECCIONAR":
         # --- NUEVA SECCIÓN DE FILTROS DENTRO DEL CONTENEDOR ---
-        st.subheader(f"⬛ {f_cat}")
+        st.subheader(f"🟦 {f_cat}")
         
         with st.container(border=True):
             st.markdown("### 🔍 BUSCAR POR:")
@@ -466,3 +466,4 @@ elif menu == "HISTORIAL ELIMINADOS":
     st.title("🗑️ ACTIVOS ELIMINADOS")
     with conectar_db() as conn:
         st.dataframe(pd.read_sql_query("SELECT * FROM activos_eliminados", conn), use_container_width=True)
+
