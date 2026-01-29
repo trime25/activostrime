@@ -76,7 +76,7 @@ def limpiar_campos_registro():
 def visor_documento(path, nombre):
     st.write(f"### {nombre}")
     if path.lower().endswith('.pdf'): display_pdf(path)
-    else: st.info("Vista previa solo disponible para archivos PDF.")
+    else: st.info("**Vista previa solo disponible para archivos PDF.**")
     with open(path, "rb") as f: st.download_button("📥 DESCARGAR", f, file_name=nombre, key=f"dl_{path}")
 
 @st.dialog("CONFIRMAR ELIMINACIÓN DE ACTIVO")
@@ -102,6 +102,33 @@ def confirmar_eliminacion_ubi(nombre, pais):
             conn.commit()
         st.success("Ubicación eliminada."); st.rerun()
 
+@st.dialog("EDITAR UBICACIÓN")
+def editar_ubicacion_dialog(nombre_actual, pais_actual):
+    st.write(f"Modificando nombre de la ubicación en **{pais_actual}**")
+    nuevo_nombre = st.text_input("NUEVO NOMBRE", value=nombre_actual).upper()
+    
+    st.warning("⚠️ **Nota: Al cambiar el nombre, todos los activos asociados a esta ubicación se actualizarán automáticamente.**")
+    
+    if st.button("GUARDAR CAMBIOS", use_container_width=True):
+        if nuevo_nombre and nuevo_nombre != nombre_actual:
+            with conectar_db() as conn:
+                try:
+                    # 1. Actualizar el nombre en la tabla de ubicaciones
+                    conn.execute("UPDATE ubicaciones SET nombre=? WHERE nombre=? AND pais=?", 
+                                 (nuevo_nombre, nombre_actual, pais_actual))
+                    # 2. Actualizar los activos vinculados para mantener integridad
+                    conn.execute("UPDATE activos SET ubicacion=? WHERE ubicacion=? AND pais=?", 
+                                 (nuevo_nombre, nombre_actual, pais_actual))
+                    conn.commit()
+                    st.success("**Ubicación actualizada con éxito.**")
+                    st.rerun()
+                except sqlite3.IntegrityError:
+                    st.error(f"❌ **Error: Ya existe una ubicación llamada '{nuevo_nombre}' en {pais_actual}.**")
+        elif nuevo_nombre == nombre_actual:
+            st.info("No hay cambios detectados.")
+        else:
+            st.error("**El nombre no puede estar vacío.**")
+
 # --- NAVEGACIÓN ---
 menu = st.sidebar.radio("MENÚ", ["DASHBOARD", "REGISTRAR ACTIVO", "TRASLADOS", "GESTIONAR UBICACIONES", "HISTORIAL ELIMINADOS"])
 
@@ -117,19 +144,19 @@ if menu == "DASHBOARD":
         ubis = pd.read_sql_query("SELECT nombre FROM ubicaciones", conn)['nombre'].tolist()
 
     # Se añade una opción vacía por defecto
-    f_cat = st.selectbox("**SELECCIONE CATEGORÍA**", ["SELECCIONE"] + CATEGORIAS_LISTA)
+    f_cat = st.selectbox("**SELECCIONAR CATEGORÍA**", ["SELECCIONAR"] + CATEGORIAS_LISTA)
 
     # Solo mostrar información si se ha seleccionado una categoría válida
-    if f_cat != "SELECCIONE":
+    if f_cat != "SELECCIONAR":
         # --- NUEVA SECCIÓN DE FILTROS DENTRO DEL CONTENEDOR ---
-        st.subheader(f"🌐 {f_cat}")
+        st.subheader(f"⬛ {f_cat}")
         
         with st.container(border=True):
-            st.markdown("### 🔍 Filtros de búsqueda")
+            st.markdown("### 🔍 BUSCAR POR:")
             c_f1, c_f2, c_f3 = st.columns(3)
             f_est = c_f1.selectbox("ESTADO", ["TODOS", "OPERATIVO", "DAÑADO", "REPARACION"])
             f_ubi = c_f2.selectbox("UBICACIÓN", ["TODAS"] + ubis)
-            f_busq = c_f3.text_input("BUSCAR POR ID O MARCA").upper()
+            f_busq = c_f3.text_input("CÓDIGO O MARCA").upper()
         # -----------------------------------------------------
 
         df_f = df.copy()
@@ -196,7 +223,7 @@ if menu == "DASHBOARD":
                                     if st.checkbox(f"**ELIMINAR DOCUMENTO**: {d_n}", key=f"del_d_box_{d_p}"):
                                         eliminar_docs.append(d_p)
                                         
-                                        st.write("➕ **AÑADIR NUEVOS ARCHIVOS**")
+                                        st.write("➕ **AÑADIR ARCHIVOS**")
                                 f, cd = st.columns(2)
                                 # Solo permite imágenes
                                 nuevas_fotos = f.file_uploader("SUBIR FOTOS", accept_multiple_files=True, 
@@ -280,7 +307,7 @@ elif menu == "REGISTRAR ACTIVO":
     
     with st.container(border=True):
         if df_todas_ubis.empty: 
-            st.warning("⚠️ **DEBE CREAR UNA UBICACIÓN PRIMERO EN EL MENÚ CORRESPONDIENTE**")
+            st.warning("⚠️ **DEBE CREAR UNA UBICACIÓN PRIMERO**")
         
         rid = st.text_input("ID ACTIVO*", key="reg_id", help="Código único del activo").upper()
         
@@ -292,7 +319,7 @@ elif menu == "REGISTRAR ACTIVO":
         ubis_filtradas = df_todas_ubis[df_todas_ubis['pais'] == rpais]['nombre'].tolist()
         
         if not df_todas_ubis.empty and not ubis_filtradas:
-            st.warning(f"No hay ubicaciones creadas para {rpais}")
+            st.warning(f"⚠️**No hay ubicaciones creadas para {rpais}**")
 
         c1, c2 = st.columns(2)
         rmarc = c1.text_input("MARCA", key="reg_marc").upper()
@@ -311,7 +338,7 @@ elif menu == "REGISTRAR ACTIVO":
         rfotos = col_f.file_uploader("🖼️ FOTOS", accept_multiple_files=True, type=['png','jpg','jpeg'], key="reg_fotos")
         rdocs = col_d.file_uploader("📄 DOCUMENTOS (PDF/Office)", accept_multiple_files=True, type=['pdf', 'docx', 'xlsx', 'txt'], key="reg_docs")
         
-        if st.button("💾 FINALIZAR REGISTRO", use_container_width=True):
+        if st.button("💾 GUARDAR", use_container_width=True):
             # Validación de campos obligatorios
             if rid and ubis_filtradas and rubi != "SIN UBICACIÓN" and rcat and (rest == "OPERATIVO" or rmot):
                 try:
@@ -330,7 +357,7 @@ elif menu == "REGISTRAR ACTIVO":
                 except sqlite3.IntegrityError:
                     st.error(f"❌ El ID '{rid}' ya existe en la base de datos.")
             else:
-                st.error("⚠️ Por favor rellene todos los campos marcados con (*)")
+                st.error("⚠️ **Por favor rellene todos los campos marcados con (*)**.")
 
 elif menu == "TRASLADOS":
     st.title("🚚 TRASLADOS")
@@ -340,7 +367,7 @@ elif menu == "TRASLADOS":
         df_u = pd.read_sql_query("SELECT * FROM ubicaciones", conn)
     
     # 1. Selección de País de Origen
-    st.subheader("Destino")
+    st.subheader("Origen")
     opais = st.selectbox("PAÍS ORIGEN", PAISES_LISTA)
     
     # 2. Filtrar activos que pertenecen únicamente al país de origen seleccionado
@@ -355,7 +382,7 @@ elif menu == "TRASLADOS":
         st.divider()
         
         # 4. Selección de Destino
-        st.subheader("Origen")
+        st.subheader("Destino")
         ct1, ct2 = st.columns(2)
         tpais = ct1.selectbox("PAÍS DESTINO", PAISES_LISTA)
         
@@ -365,7 +392,7 @@ elif menu == "TRASLADOS":
         
         mot = st.text_input("MOTIVO").upper()
         
-        if st.button("EJECUTAR TRASLADO", use_container_width=True):
+        if st.button("PROCESAR", use_container_width=True):
             if tubi != "SIN OPCIONES":
                 with conectar_db() as conn:
                     conn.execute("UPDATE activos SET ubicacion=?, pais=? WHERE id=?", (tubi, tpais, sel_id))
@@ -376,7 +403,7 @@ elif menu == "TRASLADOS":
             else:
                 st.error("Error: No se ha seleccionado una ubicación de destino válida.")
     else:
-        st.warning(f"⚠️ No se hay activos registrados para **{opais}**.")
+        st.warning(f"⚠️ No hay activos registrados para **{opais}**.")
         st.write("---")
 
 
@@ -385,21 +412,20 @@ elif menu == "TRASLADOS":
         st.dataframe(pd.read_sql_query("SELECT * FROM historial ORDER BY fecha DESC", conn), use_container_width=True)
 
 elif menu == "GESTIONAR UBICACIONES":
-    st.title("📍 GESTIÓN DE UBICACIONES")
+    st.title("📍 CREAR UBICACIÓN")
     
-    # Formulario para limpiar el nombre de la ubicación automáticamente
+    # El formulario de registro se mantiene tal cual pediste
     with st.form("form_ubicaciones", clear_on_submit=True):
         c_u1, c_u2 = st.columns(2)
         upais = c_u1.selectbox("**REGISTRAR UBICACIÓN EN:**", PAISES_LISTA)
         unombre = c_u2.text_input("NOMBRE DE LA NUEVA UBICACIÓN (Ej: ALMACÉN GENERAL)").upper()
         
-        btn_add = st.form_submit_button("➕  AÑADIR UBICACIÓN", use_container_width=True)
+        btn_add = st.form_submit_button("💾 GUARDAR", use_container_width=True)
         
         if btn_add:
             if unombre:
                 with conectar_db() as conn:
                     try:
-                        # La DB permite nombres duplicados siempre que el país sea distinto
                         conn.execute("INSERT INTO ubicaciones (nombre, pais) VALUES (?, ?)", (unombre, upais))
                         conn.commit()
                         st.success(f"✅ Registrado: {unombre} en {upais}")
@@ -410,28 +436,33 @@ elif menu == "GESTIONAR UBICACIONES":
                 st.warning("⚠️ Por favor, escribe un nombre.")
 
     st.divider()
-    st.subheader("Ultimas Ubicaciones Registradas")
+    st.subheader("Ubicaciones Registradas")
     with conectar_db() as conn:
         ubis_db = conn.execute("SELECT nombre, pais FROM ubicaciones ORDER BY pais ASC, nombre ASC").fetchall()
         
         if not ubis_db:
             st.info("No hay ubicaciones registradas.")
         else:
+            # Encabezado de tabla simple para mejor visualización
             for u in ubis_db:
-                col1, col2 = st.columns([4, 1])
-                col1.write(f"🚩 **{u[1]}** ➔ {u[0]}")
+                # Ajuste de columnas para añadir el botón de edición
+                col_info, col_edit, col_del = st.columns([4, 0.5, 0.5])
                 
-                if col2.button("🗑️", key=f"del_{u[0]}_{u[1]}"):
-                    # CAMBIO NECESARIO: Filtrar por ubicación Y país para permitir duplicidad de nombres
+                col_info.write(f"🚩 **{u[1]}** ➔ {u[0]}")
+                
+                # Botón para EDITAR
+                if col_edit.button("✏️", key=f"edit_btn_{u[0]}_{u[1]}"):
+                    editar_ubicacion_dialog(u[0], u[1])
+                
+                # Botón para ELIMINAR (se mantiene tu lógica original)
+                if col_del.button("🗑️", key=f"del_{u[0]}_{u[1]}"):
                     cant = conn.execute("SELECT COUNT(*) FROM activos WHERE ubicacion=? AND pais=?", (u[0], u[1])).fetchone()[0]
-                    
                     if cant > 0: 
                         st.error(f"No se puede eliminar: tiene {cant} activo(s) asociados en {u[1]}.")
                     else: 
                         confirmar_eliminacion_ubi(u[0], u[1])
 
 elif menu == "HISTORIAL ELIMINADOS":
-    st.title("🗑️ ELIMINADOS")
+    st.title("🗑️ ACTIVOS ELIMINADOS")
     with conectar_db() as conn:
         st.dataframe(pd.read_sql_query("SELECT * FROM activos_eliminados", conn), use_container_width=True)
-
