@@ -65,6 +65,12 @@ def guardar_archivos(id_activo, archivos, tipo):
             else: conn.execute("INSERT INTO documentos (id_activo, path, nombre_real) VALUES (?,?,?)", (id_activo, ruta, arc.name))
         conn.commit()
 
+def limpiar_campos_registro():
+    campos = ["reg_id", "reg_marc", "reg_mod", "reg_mot", "reg_desc", "reg_fotos", "reg_docs"]
+    for campo in campos:
+        if campo in st.session_state:
+            st.session_state[campo] = "" if "fotos" not in campo and "docs" not in campo else None
+
 # --- DIÁLOGOS ---
 @st.dialog("VISOR")
 def visor_documento(path, nombre):
@@ -100,7 +106,11 @@ def confirmar_eliminacion_ubi(nombre, pais):
 menu = st.sidebar.radio("MENÚ", ["DASHBOARD", "REGISTRAR ACTIVO", "TRASLADOS", "GESTIONAR UBICACIONES", "HISTORIAL ELIMINADOS"])
 
 if menu == "DASHBOARD":
-    st.title("📊 ACTIVOS")
+    col_titulo, col_logo = st.columns([3, 1])
+    with col_titulo:
+        st.title("📊 ACTIVOS")
+    with col_logo:
+        st.image("logotrieca.png", width=150)
     with conectar_db() as conn:
         df = pd.read_sql_query("SELECT * FROM activos", conn)
         ubis = pd.read_sql_query("SELECT nombre FROM ubicaciones", conn)['nombre'].tolist()
@@ -111,7 +121,7 @@ if menu == "DASHBOARD":
     f_busq = st.sidebar.text_input("BUSCAR POR ID O MARCA").upper()
     
     # Se añade una opción vacía por defecto
-    f_cat = st.selectbox("**SELECCIONE UNA CATEGORÍA**", ["SELECCIONE"] + CATEGORIAS_LISTA)
+    f_cat = st.selectbox("**SELECCIONAR CATEGORÍA**", ["SELECCIONE"] + CATEGORIAS_LISTA)
 
     # Solo mostrar información si se ha seleccionado una categoría válida
     if f_cat != "SELECCIONE":
@@ -177,11 +187,17 @@ if menu == "DASHBOARD":
                                 for d_p, d_n in docs_actuales:
                                     if st.checkbox(f"**ELIMINAR DOCUMENTO**: {d_n}", key=f"del_d_box_{d_p}"):
                                         eliminar_docs.append(d_p)
-
-                                st.write("➕ **AÑADIR NUEVOS ARCHIVOS**")
-                                cf, cd = st.columns(2)
-                                nuevas_fotos = cf.file_uploader("SUBIR FOTOS", accept_multiple_files=True, key=f"nf_edit_{row['id']}")
-                                nuevos_docs = cd.file_uploader("SUBIR DOCUMENTOS", accept_multiple_files=True, key=f"nd_edit_{row['id']}")
+                                        
+                                        st.write("➕ **AÑADIR NUEVOS ARCHIVOS**")
+                                f, cd = st.columns(2)
+                                # Solo permite imágenes
+                                nuevas_fotos = f.file_uploader("SUBIR FOTOS", accept_multiple_files=True, 
+                                type=['png', 'jpg', 'jpeg', 'webp'], 
+                                key=f"nf_edit_{row['id']}")
+                                # Solo permite documentos de oficina y PDF
+                                nuevos_docs = cd.file_uploader("SUBIR DOCUMENTOS", accept_multiple_files=True, 
+                               type=['pdf', 'docx', 'xlsx', 'xls', 'txt'], 
+                               key=f"nd_edit_{row['id']}")
 
                                 if st.form_submit_button("💾 GUARDAR CAMBIOS"):
                                     with conectar_db() as conn:
@@ -238,25 +254,44 @@ if menu == "DASHBOARD":
 elif menu == "REGISTRAR ACTIVO":
     st.title("📝 REGISTRO")
     with conectar_db() as conn:
-        ubis = pd.read_sql_query("SELECT nombre FROM ubicaciones", conn)['nombre'].tolist()
+        # Obtenemos todas las ubicaciones para filtrar después
+        df_todas_ubis = pd.read_sql_query("SELECT nombre, pais FROM ubicaciones", conn)
+    
     with st.container(border=True):
-        if not ubis: st.warning("**DEBE CREAR UNA UBICACIÓN**")
+        # Mensaje si no existe ninguna ubicación en la base de datos
+        if df_todas_ubis.empty: 
+            st.warning("**DEBE CREAR UNA UBICAIÓN**")
+        
         rid = st.text_input("ID ACTIVO*").upper()
         c_p1, c_p2 = st.columns(2)
         rcat = c_p1.selectbox("CATEGORÍA*", CATEGORIAS_LISTA, key="reg_cat")
         rpais = c_p2.selectbox("PAÍS*", PAISES_LISTA, key="reg_pais")
+        
+        # Filtrar ubicaciones por el país seleccionado
+        ubis_filtradas = df_todas_ubis[df_todas_ubis['pais'] == rpais]['nombre'].tolist()
+        
+        # Mensaje si no hay ubicaciones registradas para el país seleccionado
+        if not df_todas_ubis.empty and not ubis_filtradas:
+            st.warning(f"⚠️ No hay ubicaciones creadas para {rpais}")
+
         c1, c2 = st.columns(2)
         rmarc = c1.text_input("MARCA").upper()
         rmod = c2.text_input("MODELO").upper()
-        rubi = c1.selectbox("UBICACIÓN", ubis, key="reg_ubi") 
+        
+        # Se cargan solo las ubicaciones del país o una lista vacía
+        rubi = c1.selectbox("UBICACIÓN", ubis_filtradas if ubis_filtradas else ["DEBE CREAR UNA UBICACIÓN"], key="reg_ubi") 
+        
         rest = c2.selectbox("ESTADO", ["OPERATIVO", "DAÑADO", "REPARACION"], key="reg_est")
         rmot = st.text_input("MOTIVO DE TRASLADO / DAÑO*").upper() if rest in ["DAÑADO", "REPARACION"] else ""
         rdesc = st.text_area("DESCRIPCIÓN").upper()
+        
         col_f, col_d = st.columns(2)
         rfotos = col_f.file_uploader("🖼️ SUBIR FOTOS", accept_multiple_files=True, type=['png','jpg','jpeg'], key="reg_fotos")
-        rdocs = col_d.file_uploader("📄 SUBIR DOCUMENTOS", accept_multiple_files=True, key="reg_docs")
+        rdocs = col_d.file_uploader("📄 SUBIR DOCUMENTOS", accept_multiple_files=True, type=['pdf', 'docx', 'xlsx', 'xls', 'txt'], key="reg_docs")
+        
         if st.button("💾 REGISTRAR ACTIVO", use_container_width=True):
-            if rid and rubi and rcat and rpais and (rest == "OPERATIVO" or rmot):
+            # Validación de que la ubicación sea válida (no "SIN UBICACIÓN")
+            if rid and ubis_filtradas and rubi != "SIN UBICACIÓN" and rcat and rpais and (rest == "OPERATIVO" or rmot):
                 with conectar_db() as conn:
                     conn.execute("""INSERT INTO activos (id, marca, modelo, ubicacion, estado, motivo_estado, descripcion, ultima_revision, categoria, pais) 
                                  VALUES (?,?,?,?,?,?,?,?,?,?)""", 
@@ -264,60 +299,92 @@ elif menu == "REGISTRAR ACTIVO":
                 if rfotos: guardar_archivos(rid, rfotos, 'foto')
                 if rdocs: guardar_archivos(rid, rdocs, 'doc')
                 st.success(f"Activo {rid} guardado correctamente."); st.rerun()
-            else: st.error("Faltan campos obligatorios (*)")
+            else:
+                if not ubis_filtradas:
+                    st.error("No se puede registrar: El país seleccionado no tiene ubicaciones.")
+                else:
+                    st.error("Faltan campos obligatorios (*)")
 
 elif menu == "TRASLADOS":
     st.title("🚚 TRASLADOS")
     with conectar_db() as conn:
+        # Cargamos todos los activos y ubicaciones para el filtrado dinámico
         activos = pd.read_sql_query("SELECT id, ubicacion, pais FROM activos", conn)
         df_u = pd.read_sql_query("SELECT * FROM ubicaciones", conn)
     
-    if not activos.empty:
-        sel_id = st.selectbox("SELECCIONE ACTIVO", activos['id'])
-        curr = activos[activos['id'] == sel_id].iloc[0]
-        st.info(f"📍 Actual: {curr['pais']} - {curr['ubicacion']}")
+    # 1. Selección de País de Origen
+    st.subheader("Destino")
+    opais = st.selectbox("PAÍS ORIGEN", PAISES_LISTA)
+    
+    # 2. Filtrar activos que pertenecen únicamente al país de origen seleccionado
+    activos_filtrados = activos[activos['pais'] == opais]
+    
+    if not activos_filtrados.empty:
+        # 3. Selección de activo basada en el filtro anterior
+        sel_id = st.selectbox("SELECCIONE ACTIVO", activos_filtrados['id'])
+        curr = activos_filtrados[activos_filtrados['id'] == sel_id].iloc[0]
         
+        st.info(f"📍 Ubicación Actual: {curr['pais']} - {curr['ubicacion']}")
+        st.divider()
+        
+        # 4. Selección de Destino
+        st.subheader("Origen")
         ct1, ct2 = st.columns(2)
         tpais = ct1.selectbox("PAÍS DESTINO", PAISES_LISTA)
-        # Filtrar ubicaciones del país destino
+        
+        # Filtrar ubicaciones disponibles en el país destino seleccionado
         u_dest_list = df_u[df_u['pais'] == tpais]['nombre'].tolist()
         tubi = ct2.selectbox("UBICACIÓN DESTINO", u_dest_list if u_dest_list else ["SIN OPCIONES"])
         
         mot = st.text_input("MOTIVO").upper()
-        if st.button("EJECUTAR TRASLADO"):
+        
+        if st.button("EJECUTAR TRASLADO", use_container_width=True):
             if tubi != "SIN OPCIONES":
                 with conectar_db() as conn:
                     conn.execute("UPDATE activos SET ubicacion=?, pais=? WHERE id=?", (tubi, tpais, sel_id))
-                    conn.execute("INSERT INTO historial VALUES (?,?,?,?,?)", (sel_id, f"{curr['pais']}-{curr['ubicacion']}", f"{tpais}-{tubi}", datetime.now(), mot))
-                st.success("Traslado realizado."); st.rerun()
+                    conn.execute("INSERT INTO historial (id_activo, origen, destino, fecha, motivo) VALUES (?,?,?,?,?)", 
+                                 (sel_id, f"{curr['pais']}-{curr['ubicacion']}", f"{tpais}-{tubi}", datetime.now(), mot))
+                    conn.commit()
+                st.success(f"Traslado del activo {sel_id} realizado con éxito."); st.rerun()
+            else:
+                st.error("Error: No se ha seleccionado una ubicación de destino válida.")
+    else:
+        st.warning(f"⚠️ No se hay activos registrados para **{opais}**.")
+        st.write("---")
+
+
+    st.write("### HISTORIAL DE MOVIMIENTOS")
+    with conectar_db() as conn:
+        st.dataframe(pd.read_sql_query("SELECT * FROM historial ORDER BY fecha DESC", conn), use_container_width=True)
 
 elif menu == "GESTIONAR UBICACIONES":
     st.title("📍 GESTIÓN DE UBICACIONES")
     
-    with st.container(border=True):
+    # Formulario para limpiar el nombre de la ubicación automáticamente
+    with st.form("form_ubicaciones", clear_on_submit=True):
         c_u1, c_u2 = st.columns(2)
         upais = c_u1.selectbox("PAÍS PARA LA UBICACIÓN", PAISES_LISTA)
         unombre = c_u2.text_input("NOMBRE DE LA NUEVA UBICACIÓN (Ej: ALMACÉN GENERAL)").upper()
         
-        if st.button("➕ AÑADIR UBICACIÓN", use_container_width=True):
+        btn_add = st.form_submit_button("➕  AÑADIR UBICACIÓN", use_container_width=True)
+        
+        if btn_add:
             if unombre:
                 with conectar_db() as conn:
                     try:
-                        # Intentamos insertar la combinación nombre + pais
+                        # La DB permite nombres duplicados siempre que el país sea distinto
                         conn.execute("INSERT INTO ubicaciones (nombre, pais) VALUES (?, ?)", (unombre, upais))
                         conn.commit()
                         st.success(f"✅ Registrado: {unombre} en {upais}")
                         st.rerun()
                     except sqlite3.IntegrityError:
-                        # Este error solo saltará si el NOMBRE y el PAÍS son idénticos a uno existente
-                        st.error(f"❌ Error: La ubicación '{unombre}' ya existe registrada en {upais}.")
+                        st.error(f"❌ La ubicación '{unombre}' ya existe en {upais}.")
             else:
-                st.warning("⚠️ Por favor, escribe un nombre para la ubicación.")
+                st.warning("⚠️ Por favor, escribe un nombre.")
 
     st.divider()
-    st.subheader("Ubicaciones Registradas")
+    st.subheader("Ultimas Ubicaciones Registradas")
     with conectar_db() as conn:
-        # Ordenamos para ver agrupado por país y luego nombre
         ubis_db = conn.execute("SELECT nombre, pais FROM ubicaciones ORDER BY pais ASC, nombre ASC").fetchall()
         
         if not ubis_db:
@@ -325,12 +392,16 @@ elif menu == "GESTIONAR UBICACIONES":
         else:
             for u in ubis_db:
                 col1, col2 = st.columns([4, 1])
-                # Mostramos claramente la relación País > Ubicación
                 col1.write(f"🚩 **{u[1]}** ➔ {u[0]}")
+                
                 if col2.button("🗑️", key=f"del_{u[0]}_{u[1]}"):
-                    cant = conn.execute("SELECT COUNT(*) FROM activos WHERE ubicacion=?", (u[0],)).fetchone()[0]
-                    if cant > 0: st.error(f"No se puede eliminar: tiene {cant} activo(s) asociados.")
-                    else: confirmar_eliminacion_ubi(u[0], u[1])
+                    # CAMBIO NECESARIO: Filtrar por ubicación Y país para permitir duplicidad de nombres
+                    cant = conn.execute("SELECT COUNT(*) FROM activos WHERE ubicacion=? AND pais=?", (u[0], u[1])).fetchone()[0]
+                    
+                    if cant > 0: 
+                        st.error(f"No se puede eliminar: tiene {cant} activo(s) asociados en {u[1]}.")
+                    else: 
+                        confirmar_eliminacion_ubi(u[0], u[1])
 
 elif menu == "HISTORIAL ELIMINADOS":
     st.title("🗑️ ELIMINADOS")
