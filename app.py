@@ -413,24 +413,39 @@ elif menu == "TRASLADOS":
 
 elif menu == "GESTIONAR UBICACIONES":
     st.title("📍 CREAR UBICACIÓN")
+    
+    # Diccionario de banderas para mantener la estética
+    banderas = {
+        "VENEZUELA": "🇻🇪",
+        "COLOMBIA": "🇨🇴",
+        "ESTADOS UNIDOS": "🇺🇸"
+    }
+
     with st.form("form_ubicaciones", clear_on_submit=True):
         c_u1, c_u2 = st.columns(2)
-        upais = c_u1.selectbox("**REGISTRAR UBICACIÓN EN:**", PAISES_LISTA)
+        # Se añaden las banderas al selector para mejorar la experiencia visual
+        upais = c_u1.selectbox(
+            "**REGISTRAR UBICACIÓN EN:**", 
+            PAISES_LISTA, 
+            format_func=lambda x: f"{banderas.get(x, '🌐')} {x}"
+        )
         unombre = c_u2.text_input("NOMBRE DE LA NUEVA UBICACIÓN").upper()
+        
         if st.form_submit_button("💾 GUARDAR", use_container_width=True):
             if unombre:
                 with conectar_db() as conn:
                     try:
                         conn.execute("INSERT INTO ubicaciones (nombre, pais) VALUES (?, ?)", (unombre, upais))
                         conn.commit()
-                        st.success("Registrado."); st.rerun()
-                    except sqlite3.IntegrityError: st.error("Ya existe.")
+                        st.success(f"Registrado con éxito en {banderas.get(upais, '')} {upais}")
+                        st.rerun()
+                    except sqlite3.IntegrityError: 
+                        st.error("Ya existe esta ubicación en ese país.")
 
     st.divider()
     st.subheader("Ubicaciones Registradas")
     
     with conectar_db() as conn:
-        # --- CAMBIO AQUÍ: Ordenamos por rowid DESC para ver los últimos registros primero ---
         ubis_db = conn.execute("SELECT nombre, pais FROM ubicaciones ORDER BY rowid DESC").fetchall()
         
         if ubis_db:
@@ -440,23 +455,23 @@ elif menu == "GESTIONAR UBICACIONES":
             total_u = len(ubis_db)
             total_pags_u = (total_u - 1) // ITEMS_POR_PAGINA + 1
             
-            # Ajuste de seguridad para el índice de página
             if st.session_state.pag_ubi >= total_pags_u:
                 st.session_state.pag_ubi = 0
                 
             inicio_u = st.session_state.pag_ubi * ITEMS_POR_PAGINA
             fin_u = inicio_u + ITEMS_POR_PAGINA
             
-            # Mostrar registros de la página actual
             for u in ubis_db[inicio_u : fin_u]:
                 col_i, col_e, col_d = st.columns([4, 0.5, 0.5])
-                col_i.write(f"🚩 **{u[1]}** ➔ {u[0]}")
+                # Se asigna la bandera correspondiente según el país registrado en la DB
+                bandera_actual = banderas.get(u[1], "🚩")
+                col_i.write(f"{bandera_actual} **{u[1]}** ➔ {u[0]}")
+                
                 if col_e.button("✏️", key=f"ed_u_{u[0]}_{u[1]}"): 
                     editar_ubicacion_dialog(u[0], u[1])
                 if col_d.button("🗑️", key=f"de_u_{u[0]}_{u[1]}"): 
                     confirmar_eliminacion_ubi(u[0], u[1])
             
-            # Controles de navegación
             if total_pags_u > 1:
                 st.write("---")
                 c_u1, c_u2, c_u3 = st.columns([1, 2, 1])
