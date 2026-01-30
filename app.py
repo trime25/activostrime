@@ -412,7 +412,7 @@ elif menu == "TRASLADOS":
     else: st.info("Sin movimientos registrados.")
 
 elif menu == "GESTIONAR UBICACIONES":
-    st.title("📍 CREAR UBICACIÓN")
+    st.title("📍 GESTIONAR UBICACIONES")
     
     # Diccionario de banderas para mantener la estética
     banderas = {
@@ -422,28 +422,28 @@ elif menu == "GESTIONAR UBICACIONES":
     }
 
     with st.form("form_ubicaciones", clear_on_submit=True):
+        st.subheader("Registrar Nueva Ubicación")
         c_u1, c_u2 = st.columns(2)
-        # Se añaden las banderas al selector para mejorar la experiencia visual
         upais = c_u1.selectbox(
-            "**REGISTRAR UBICACIÓN EN:**", 
+            "**PAÍS:**", 
             PAISES_LISTA, 
             format_func=lambda x: f"{banderas.get(x, '🌐')} {x}"
         )
-        unombre = c_u2.text_input("NOMBRE DE LA NUEVA UBICACIÓN").upper()
+        unombre = c_u2.text_input("NOMBRE DE LA UBICACIÓN").upper()
         
-        if st.form_submit_button("💾 GUARDAR", use_container_width=True):
+        if st.form_submit_button("💾 GUARDAR UBICACIÓN", use_container_width=True):
             if unombre:
                 with conectar_db() as conn:
                     try:
                         conn.execute("INSERT INTO ubicaciones (nombre, pais) VALUES (?, ?)", (unombre, upais))
                         conn.commit()
-                        st.success(f"Registrado con éxito en {banderas.get(upais, '')} {upais}")
+                        st.success(f"✅ ¡{unombre} guardada con éxito en {upais}!")
                         st.rerun()
                     except sqlite3.IntegrityError: 
-                        st.error("Ya existe esta ubicación en ese país.")
+                        st.error("❌ Esta ubicación ya existe en este país.")
 
     st.divider()
-    st.subheader("Ubicaciones Registradas")
+    st.subheader("Lista de Ubicaciones")
     
     with conectar_db() as conn:
         ubis_db = conn.execute("SELECT nombre, pais FROM ubicaciones ORDER BY rowid DESC").fetchall()
@@ -461,19 +461,25 @@ elif menu == "GESTIONAR UBICACIONES":
             inicio_u = st.session_state.pag_ubi * ITEMS_POR_PAGINA
             fin_u = inicio_u + ITEMS_POR_PAGINA
             
+            # --- LISTADO CON DIVISORES ---
             for u in ubis_db[inicio_u : fin_u]:
                 col_i, col_e, col_d = st.columns([4, 0.5, 0.5])
-                # Se asigna la bandera correspondiente según el país registrado en la DB
                 bandera_actual = banderas.get(u[1], "🚩")
-                col_i.write(f"{bandera_actual} **{u[1]}** ➔ {u[0]}")
                 
-                if col_e.button("✏️", key=f"ed_u_{u[0]}_{u[1]}"): 
+                with col_i:
+                    st.markdown(f"#### {bandera_actual} {u[0]}")
+                    st.caption(f"País: {u[1]}")
+                
+                if col_e.button("✏️", key=f"ed_u_{u[0]}_{u[1]}", help="Editar"): 
                     editar_ubicacion_dialog(u[0], u[1])
-                if col_d.button("🗑️", key=f"de_u_{u[0]}_{u[1]}"): 
+                
+                if col_d.button("🗑️", key=f"de_u_{u[0]}_{u[1]}", help="Eliminar"): 
                     confirmar_eliminacion_ubi(u[0], u[1])
+                
+                st.divider() # <--- Divisor añadido para separar cada registro
             
+            # Navegación de páginas
             if total_pags_u > 1:
-                st.write("---")
                 c_u1, c_u2, c_u3 = st.columns([1, 2, 1])
                 if st.session_state.pag_ubi > 0:
                     if c_u1.button("⬅️ Anterior", key="prev_u", use_container_width=True):
@@ -487,7 +493,7 @@ elif menu == "GESTIONAR UBICACIONES":
                         st.session_state.pag_ubi += 1
                         st.rerun()
         else:
-            st.info("No hay ubicaciones registradas todavía.")
+            st.info("Aún no has registrado ninguna ubicación.")
 
 elif menu == "HISTORIAL ELIMINADOS":
     st.title("🗑️ ACTIVOS ELIMINADOS")
