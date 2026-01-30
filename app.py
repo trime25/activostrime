@@ -111,15 +111,41 @@ def editar_ubicacion_dialog(nombre_actual, pais_actual):
                 except sqlite3.IntegrityError:
                     st.error(f"❌ **Error: Ya existe una ubicación llamada '{nuevo_nombre}' en {pais_actual}.**")
 
+
 # --- NAVEGACIÓN ---
-menu = st.sidebar.radio("MENÚ", ["DASHBOARD", "REGISTRAR ACTIVO", "TRASLADOS", "GESTIONAR UBICACIONES", "HISTORIAL ELIMINADOS"])
+
+opciones_menu = ["DASHBOARD", "REGISTRAR ACTIVO", "TRASLADOS", "GESTIONAR UBICACIONES", "HISTORIAL ELIMINADOS"]
+
+# Si no existe la variable de navegación, la inicializamos
+if "navegacion_interna" not in st.session_state:
+    st.session_state.navegacion_interna = "DASHBOARD"
+
+# Calculamos el índice basándonos en la selección actual
+try:
+    indice_actual = opciones_menu.index(st.session_state.navegacion_interna)
+except ValueError:
+    indice_actual = 0
+
+# IMPORTANTE: Eliminamos el 'key' del radio y usamos 'index'
+menu = st.sidebar.radio("MENÚ", opciones_menu, index=indice_actual)
+
+# Sincronizamos la variable por si el usuario hace clic manualmente
+st.session_state.navegacion_interna = menu
+
+
+
+# --- DASHBOARD ---
 
 if menu == "DASHBOARD":
-    col_titulo, col_logo = st.columns([3, 1])
-    with col_titulo:
+    # Se crean 3 columnas para que los dos logos y el título queden en una sola fila
+    col_logo1, col_logo2, col_titulo = st.columns([1, 1, 4])
+    
+    with col_logo1:
         st.image("logotrieca.png", width=150)
-    with col_logo:
-       st.title("ACTIVOS") 
+    with col_logo2:
+        st.image("siat.png", width=150)
+    with col_titulo:
+        st.title("ACTIVOS") 
     
     with conectar_db() as conn:
         df = pd.read_sql_query("SELECT * FROM activos", conn)
@@ -292,18 +318,18 @@ if menu == "DASHBOARD":
     else:
         st.info("👋 Bienvenido. Por favor, selecciona una **Categoría**.")
 
+
+#--- REGISTRAR ACTIVO ---
+
 elif menu == "REGISTRAR ACTIVO":
     st.title("📝 REGISTRO DE NUEVO ACTIVO")
     
-    # Centralizamos la limpieza en una función que no cause conflictos de estado
     def realizar_limpieza_y_exito(id_activo):
         st.toast(f"✅ Activo {id_activo} guardado con éxito", icon='🎉')
-        # Borramos las claves del estado para que los widgets se reinicien
         claves_a_limpiar = ["reg_id", "reg_marc", "reg_mod", "reg_mot", "reg_desc", "reg_fotos", "reg_docs"]
         for clave in claves_a_limpiar:
             if clave in st.session_state:
                 del st.session_state[clave]
-        # Esperamos un momento para que el usuario vea el toast antes del rerun
         import time
         time.sleep(1.2)
         st.rerun()
@@ -314,6 +340,10 @@ elif menu == "REGISTRAR ACTIVO":
     with st.container(border=True):
         if df_todas_ubis.empty: 
             st.warning("⚠️ **DEBE CREAR UNA UBICACIÓN PRIMERO**")
+            # Botón de redirección corregido
+            if st.button("📍 IR A GESTIONAR UBICACIONES", key="redir_global", use_container_width=True):
+                st.session_state.navegacion_interna = "GESTIONAR UBICACIONES"
+                st.rerun()
         
         rid = st.text_input("ID ACTIVO*", key="reg_id", help="Código único del activo").upper()
         
@@ -321,11 +351,14 @@ elif menu == "REGISTRAR ACTIVO":
         rcat = c_p1.selectbox("CATEGORÍA*", CATEGORIAS_LISTA, key="reg_cat")
         rpais = c_p2.selectbox("PAÍS*", PAISES_LISTA, key="reg_pais")
         
-        # Filtrado dinámico de ubicaciones por país
         ubis_filtradas = df_todas_ubis[df_todas_ubis['pais'] == rpais]['nombre'].tolist()
         
         if not df_todas_ubis.empty and not ubis_filtradas:
-            st.warning(f"⚠️**No hay ubicaciones creadas para {rpais}**")
+            st.warning(f"⚠️ **No hay ubicaciones creadas para {rpais}**")
+            # Botón de redirección específica corregido
+            if st.button(f"➕ CREAR UBICACIÓN PARA {rpais}", key="redir_pais", use_container_width=True):
+                st.session_state.navegacion_interna = "GESTIONAR UBICACIONES"
+                st.rerun()
 
         c1, c2 = st.columns(2)
         rmarc = c1.text_input("MARCA", key="reg_marc").upper()
@@ -345,7 +378,6 @@ elif menu == "REGISTRAR ACTIVO":
         rdocs = col_d.file_uploader("📄 DOCUMENTOS (PDF/Office)", accept_multiple_files=True, type=['pdf', 'docx', 'xlsx', 'txt'], key="reg_docs")
         
         if st.button("💾 GUARDAR", use_container_width=True):
-            # Validación de campos obligatorios
             if rid and ubis_filtradas and rubi != "SIN UBICACIÓN" and rcat and (rest == "OPERATIVO" or rmot):
                 try:
                     with conectar_db() as conn:
@@ -356,14 +388,15 @@ elif menu == "REGISTRAR ACTIVO":
                     
                     if rfotos: guardar_archivos(rid, rfotos, 'foto')
                     if rdocs: guardar_archivos(rid, rdocs, 'doc')
-                    
-                    # Ejecutamos la limpieza y notificamos
                     realizar_limpieza_y_exito(rid)
-                    
                 except sqlite3.IntegrityError:
                     st.error(f"❌ El ID '{rid}' ya existe en la base de datos.")
             else:
                 st.error("⚠️ **Por favor rellene todos los campos marcados con (*)**.")
+
+
+
+#--- TRASLADOS ---
 
 elif menu == "TRASLADOS":
     st.title("🚚 TRASLADOS")
@@ -410,6 +443,11 @@ elif menu == "TRASLADOS":
             if c_h3.button("Siguiente ➡️", key="next_hist", use_container_width=True):
                 st.session_state.pag_hist += 1; st.rerun()
     else: st.info("Sin movimientos registrados.")
+
+
+
+
+#--- GESTIONAR UBICACIONES ---
 
 elif menu == "GESTIONAR UBICACIONES":
     st.title("📍 GESTIONAR UBICACIONES")
@@ -494,6 +532,12 @@ elif menu == "GESTIONAR UBICACIONES":
                         st.rerun()
         else:
             st.info("Aún no has registrado ninguna ubicación.")
+
+
+
+
+
+            #--- HISTORIAL ELIMINADOS ---
 
 elif menu == "HISTORIAL ELIMINADOS":
     st.title("🗑️ ACTIVOS ELIMINADOS")
