@@ -111,8 +111,30 @@ def editar_ubicacion_dialog(nombre_actual, pais_actual):
                 except sqlite3.IntegrityError:
                     st.error(f"❌ **Error: Ya existe una ubicación llamada '{nuevo_nombre}' en {pais_actual}.**")
 
+
 # --- NAVEGACIÓN ---
-menu = st.sidebar.radio("MENÚ", ["DASHBOARD", "REGISTRAR ACTIVO", "TRASLADOS", "GESTIONAR UBICACIONES", "HISTORIAL ELIMINADOS"])
+
+opciones_menu = ["DASHBOARD", "REGISTRAR ACTIVO", "TRASLADOS", "GESTIONAR UBICACIONES", "HISTORIAL ELIMINADOS"]
+
+# Si no existe la variable de navegación, la inicializamos
+if "navegacion_interna" not in st.session_state:
+    st.session_state.navegacion_interna = "DASHBOARD"
+
+# Calculamos el índice basándonos en la selección actual
+try:
+    indice_actual = opciones_menu.index(st.session_state.navegacion_interna)
+except ValueError:
+    indice_actual = 0
+
+# IMPORTANTE: Eliminamos el 'key' del radio y usamos 'index'
+menu = st.sidebar.radio("MENÚ", opciones_menu, index=indice_actual)
+
+# Sincronizamos la variable por si el usuario hace clic manualmente
+st.session_state.navegacion_interna = menu
+
+
+
+# --- DASHBOARD ---
 
 if menu == "DASHBOARD":
     col_titulo, col_logo = st.columns([3, 1])
@@ -123,52 +145,60 @@ if menu == "DASHBOARD":
     
     with conectar_db() as conn:
         df = pd.read_sql_query("SELECT * FROM activos", conn)
-        ubis = pd.read_sql_query("SELECT nombre FROM ubicaciones", conn)['nombre'].tolist()
+        # Obtenemos todas las ubicaciones con su respectivo país para filtrar luego
+        df_todas_ubis = pd.read_sql_query("SELECT nombre, pais FROM ubicaciones", conn)
 
     # Se añade una opción vacía por defecto
     f_cat = st.selectbox("**SELECCIONAR CATEGORÍA**", ["SELECCIONAR"] + CATEGORIAS_LISTA)
 
     # Solo mostrar información si se ha seleccionado una categoría válida
     if f_cat != "SELECCIONAR":
-        # --- NUEVA SECCIÓN DE FILTROS DENTRO DEL CONTENEDOR ---
         st.subheader(f"🟦 {f_cat}")
         
-        with st.container(border=True):
-            st.markdown("### 🔍 BUSCAR POR:")
-            c_f1, c_f2, c_f3 = st.columns(3)
-            f_est = c_f1.selectbox("ESTADO", ["TODOS", "OPERATIVO", "DAÑADO", "REPARACION"])
-            f_ubi = c_f2.selectbox("UBICACIÓN", ["TODAS"] + ubis)
-            f_busq = c_f3.text_input("CÓDIGO O MARCA").upper()
-        # -----------------------------------------------------
-
-        df_f = df.copy()
-        df_f = df_f[df_f['categoria'] == f_cat]
-        
-        # Aplicación de filtros
-        if f_est != "TODOS": df_f = df_f[df_f['estado'] == f_est]
-        if f_ubi != "TODAS": df_f = df_f[df_f['ubicacion'] == f_ubi]
-        if f_busq: 
-            df_f = df_f[df_f['id'].str.contains(f_busq, na=False) | df_f['marca'].str.contains(f_busq, na=False)]
+        # Filtro de categoría global aplicado al dataframe base
+        df_f_base = df[df['categoria'] == f_cat]
         
         c_res1, c_res2, c_res3, c_res4 = st.columns(4)
-        c_res4.metric("**TOTAL**", len(df_f))
-        c_res1.metric("**VENEZUELA** 🇻🇪", len(df_f[df_f['pais'] == "VENEZUELA"]))
-        c_res2.metric("**COLOMBIA** 🇨🇴", len(df_f[df_f['pais'] == "COLOMBIA"]))
-        c_res3.metric("**EE.UU.** 🇺🇸", len(df_f[df_f['pais'] == "ESTADOS UNIDOS"]))
+        c_res4.metric("**TOTAL**", len(df_f_base))
+        c_res1.metric("**VENEZUELA** 🇻🇪", len(df_f_base[df_f_base['pais'] == "VENEZUELA"]))
+        c_res2.metric("**COLOMBIA** 🇨🇴", len(df_f_base[df_f_base['pais'] == "COLOMBIA"]))
+        c_res3.metric("**EE.UU.** 🇺🇸", len(df_f_base[df_f_base['pais'] == "ESTADOS UNIDOS"]))
         st.divider()
 
         tabs_paises = st.tabs(PAISES_LISTA)
 
         for i, pais_nombre in enumerate(PAISES_LISTA):
             with tabs_paises[i]:
-                df_display = df_f[df_f['pais'] == pais_nombre]
+                # --- FILTROS ESPECÍFICOS POR PAÍS ---
+                with st.container(border=True):
+                    st.markdown(f"### 🔍 BUSCAR EN {pais_nombre}:")
+                    c_f1, c_f2, c_f3 = st.columns(3)
+                    
+                    # 1. Filtro de ubicaciones dinámico según el país de la pestaña
+                    ubis_pais = df_todas_ubis[df_todas_ubis['pais'] == pais_nombre]['nombre'].tolist()
+                    
+                    f_est = c_f1.selectbox("ESTADO", ["TODOS", "OPERATIVO", "DAÑADO", "REPARACION"], key=f"est_{pais_nombre}")
+                    f_ubi = c_f2.selectbox("UBICACIÓN", ["TODAS"] + ubis_pais, key=f"ubi_{pais_nombre}")
+                    f_busq = c_f3.text_input("CÓDIGO O MARCA", key=f"busq_{pais_nombre}").upper()
+                
+                # --- LÓGICA DE FILTRADO PARA LA VISTA ---
+                df_display = df_f_base[df_f_base['pais'] == pais_nombre]
+
+                if f_est != "TODOS": 
+                    df_display = df_display[df_display['estado'] == f_est]
+                if f_ubi != "TODAS": 
+                    df_display = df_display[df_display['ubicacion'] == f_ubi]
+                if f_busq: 
+                    # 2. La búsqueda ahora solo afecta a los registros del país seleccionado
+                    df_display = df_display[df_display['id'].str.contains(f_busq, na=False) | 
+                                            df_display['marca'].str.contains(f_busq, na=False)]
 
                 if df_display.empty:
-                    st.info(f"No hay activos registrados en '{f_cat}' para {pais_nombre}.")
+                    st.info(f"No hay activos que coincidan con los filtros en {pais_nombre}.")
                 else:
                     # --- LÓGICA DE PAGINACIÓN DE ACTIVOS (5 en 5) ---
                     items_por_pag = 5
-                    pag_key = f"pag_dash_{pais_nombre}_{f_cat}" # Clave única por país y categoría
+                    pag_key = f"pag_dash_{pais_nombre}_{f_cat}"
                     
                     if pag_key not in st.session_state:
                         st.session_state[pag_key] = 0
@@ -176,7 +206,6 @@ if menu == "DASHBOARD":
                     total_activos = len(df_display)
                     total_paginas = (total_activos - 1) // items_por_pag + 1
                     
-                    # Ajuste de seguridad para el índice de página
                     if st.session_state[pag_key] >= total_paginas:
                         st.session_state[pag_key] = 0
                         
@@ -206,7 +235,9 @@ if menu == "DASHBOARD":
                                     erev = st.date_input("FECHA ÚLTIMA REVISIÓN", fecha_actual)
                                     
                                     emot = st.text_input("MOTIVO / ESTADO", str(row['motivo_estado'] or "")).upper()
-                                    eubi = st.selectbox("UBICACIÓN", ubis, index=ubis.index(row['ubicacion']) if row['ubicacion'] in ubis else 0)
+                                    # Para la edición cargamos todas las del país del activo
+                                    ubis_edit = df_todas_ubis[df_todas_ubis['pais'] == epais]['nombre'].tolist()
+                                    eubi = st.selectbox("UBICACIÓN", ubis_edit, index=ubis_edit.index(row['ubicacion']) if row['ubicacion'] in ubis_edit else 0)
                                     edesc = st.text_area("DESCRIPCIÓN", str(row['descripcion'] or "")).upper()
 
                                     st.write("---")
@@ -292,18 +323,19 @@ if menu == "DASHBOARD":
     else:
         st.info("👋 Bienvenido. Por favor, selecciona una **Categoría**.")
 
+
+
+#--- REGISTRAR ACTIVO ---
+
 elif menu == "REGISTRAR ACTIVO":
     st.title("📝 REGISTRO DE NUEVO ACTIVO")
     
-    # Centralizamos la limpieza en una función que no cause conflictos de estado
     def realizar_limpieza_y_exito(id_activo):
         st.toast(f"✅ Activo {id_activo} guardado con éxito", icon='🎉')
-        # Borramos las claves del estado para que los widgets se reinicien
         claves_a_limpiar = ["reg_id", "reg_marc", "reg_mod", "reg_mot", "reg_desc", "reg_fotos", "reg_docs"]
         for clave in claves_a_limpiar:
             if clave in st.session_state:
                 del st.session_state[clave]
-        # Esperamos un momento para que el usuario vea el toast antes del rerun
         import time
         time.sleep(1.2)
         st.rerun()
@@ -314,6 +346,10 @@ elif menu == "REGISTRAR ACTIVO":
     with st.container(border=True):
         if df_todas_ubis.empty: 
             st.warning("⚠️ **DEBE CREAR UNA UBICACIÓN PRIMERO**")
+            # Botón de redirección corregido
+            if st.button("📍 IR A GESTIONAR UBICACIONES", key="redir_global", use_container_width=True):
+                st.session_state.navegacion_interna = "GESTIONAR UBICACIONES"
+                st.rerun()
         
         rid = st.text_input("ID ACTIVO*", key="reg_id", help="Código único del activo").upper()
         
@@ -321,11 +357,14 @@ elif menu == "REGISTRAR ACTIVO":
         rcat = c_p1.selectbox("CATEGORÍA*", CATEGORIAS_LISTA, key="reg_cat")
         rpais = c_p2.selectbox("PAÍS*", PAISES_LISTA, key="reg_pais")
         
-        # Filtrado dinámico de ubicaciones por país
         ubis_filtradas = df_todas_ubis[df_todas_ubis['pais'] == rpais]['nombre'].tolist()
         
         if not df_todas_ubis.empty and not ubis_filtradas:
-            st.warning(f"⚠️**No hay ubicaciones creadas para {rpais}**")
+            st.warning(f"⚠️ **No hay ubicaciones creadas para {rpais}**")
+            # Botón de redirección específica corregido
+            if st.button(f"➕ CREAR UBICACIÓN PARA {rpais}", key="redir_pais", use_container_width=True):
+                st.session_state.navegacion_interna = "GESTIONAR UBICACIONES"
+                st.rerun()
 
         c1, c2 = st.columns(2)
         rmarc = c1.text_input("MARCA", key="reg_marc").upper()
@@ -345,7 +384,6 @@ elif menu == "REGISTRAR ACTIVO":
         rdocs = col_d.file_uploader("📄 DOCUMENTOS (PDF/Office)", accept_multiple_files=True, type=['pdf', 'docx', 'xlsx', 'txt'], key="reg_docs")
         
         if st.button("💾 GUARDAR", use_container_width=True):
-            # Validación de campos obligatorios
             if rid and ubis_filtradas and rubi != "SIN UBICACIÓN" and rcat and (rest == "OPERATIVO" or rmot):
                 try:
                     with conectar_db() as conn:
@@ -356,14 +394,15 @@ elif menu == "REGISTRAR ACTIVO":
                     
                     if rfotos: guardar_archivos(rid, rfotos, 'foto')
                     if rdocs: guardar_archivos(rid, rdocs, 'doc')
-                    
-                    # Ejecutamos la limpieza y notificamos
                     realizar_limpieza_y_exito(rid)
-                    
                 except sqlite3.IntegrityError:
                     st.error(f"❌ El ID '{rid}' ya existe en la base de datos.")
             else:
                 st.error("⚠️ **Por favor rellene todos los campos marcados con (*)**.")
+
+
+
+#--- TRASLADOS ---
 
 elif menu == "TRASLADOS":
     st.title("🚚 TRASLADOS")
@@ -411,26 +450,46 @@ elif menu == "TRASLADOS":
                 st.session_state.pag_hist += 1; st.rerun()
     else: st.info("Sin movimientos registrados.")
 
+
+
+
+#--- GESTIONAR UBICACIONES ---
+
 elif menu == "GESTIONAR UBICACIONES":
-    st.title("📍 CREAR UBICACIÓN")
+    st.title("📍 GESTIONAR UBICACIONES")
+    
+    # Diccionario de banderas para mantener la estética
+    banderas = {
+        "VENEZUELA": "🇻🇪",
+        "COLOMBIA": "🇨🇴",
+        "ESTADOS UNIDOS": "🇺🇸"
+    }
+
     with st.form("form_ubicaciones", clear_on_submit=True):
+        st.subheader("Registrar Nueva Ubicación")
         c_u1, c_u2 = st.columns(2)
-        upais = c_u1.selectbox("**REGISTRAR UBICACIÓN EN:**", PAISES_LISTA)
-        unombre = c_u2.text_input("NOMBRE DE LA NUEVA UBICACIÓN").upper()
-        if st.form_submit_button("💾 GUARDAR", use_container_width=True):
+        upais = c_u1.selectbox(
+            "**PAÍS:**", 
+            PAISES_LISTA, 
+            format_func=lambda x: f"{banderas.get(x, '🌐')} {x}"
+        )
+        unombre = c_u2.text_input("NOMBRE DE LA UBICACIÓN").upper()
+        
+        if st.form_submit_button("💾 GUARDAR UBICACIÓN", use_container_width=True):
             if unombre:
                 with conectar_db() as conn:
                     try:
                         conn.execute("INSERT INTO ubicaciones (nombre, pais) VALUES (?, ?)", (unombre, upais))
                         conn.commit()
-                        st.success("Registrado."); st.rerun()
-                    except sqlite3.IntegrityError: st.error("Ya existe.")
+                        st.success(f"✅ ¡{unombre} guardada con éxito en {upais}!")
+                        st.rerun()
+                    except sqlite3.IntegrityError: 
+                        st.error("❌ Esta ubicación ya existe en este país.")
 
     st.divider()
-    st.subheader("Ubicaciones Registradas")
+    st.subheader("Lista de Ubicaciones")
     
     with conectar_db() as conn:
-        # --- CAMBIO AQUÍ: Ordenamos por rowid DESC para ver los últimos registros primero ---
         ubis_db = conn.execute("SELECT nombre, pais FROM ubicaciones ORDER BY rowid DESC").fetchall()
         
         if ubis_db:
@@ -440,25 +499,31 @@ elif menu == "GESTIONAR UBICACIONES":
             total_u = len(ubis_db)
             total_pags_u = (total_u - 1) // ITEMS_POR_PAGINA + 1
             
-            # Ajuste de seguridad para el índice de página
             if st.session_state.pag_ubi >= total_pags_u:
                 st.session_state.pag_ubi = 0
                 
             inicio_u = st.session_state.pag_ubi * ITEMS_POR_PAGINA
             fin_u = inicio_u + ITEMS_POR_PAGINA
             
-            # Mostrar registros de la página actual
+            # --- LISTADO CON DIVISORES ---
             for u in ubis_db[inicio_u : fin_u]:
                 col_i, col_e, col_d = st.columns([4, 0.5, 0.5])
-                col_i.write(f"🚩 **{u[1]}** ➔ {u[0]}")
-                if col_e.button("✏️", key=f"ed_u_{u[0]}_{u[1]}"): 
+                bandera_actual = banderas.get(u[1], "🚩")
+                
+                with col_i:
+                    st.markdown(f"#### {bandera_actual} {u[0]}")
+                    st.caption(f"País: {u[1]}")
+                
+                if col_e.button("✏️", key=f"ed_u_{u[0]}_{u[1]}", help="Editar"): 
                     editar_ubicacion_dialog(u[0], u[1])
-                if col_d.button("🗑️", key=f"de_u_{u[0]}_{u[1]}"): 
+                
+                if col_d.button("🗑️", key=f"de_u_{u[0]}_{u[1]}", help="Eliminar"): 
                     confirmar_eliminacion_ubi(u[0], u[1])
+                
+                st.divider() # <--- Divisor añadido para separar cada registro
             
-            # Controles de navegación
+            # Navegación de páginas
             if total_pags_u > 1:
-                st.write("---")
                 c_u1, c_u2, c_u3 = st.columns([1, 2, 1])
                 if st.session_state.pag_ubi > 0:
                     if c_u1.button("⬅️ Anterior", key="prev_u", use_container_width=True):
@@ -472,7 +537,13 @@ elif menu == "GESTIONAR UBICACIONES":
                         st.session_state.pag_ubi += 1
                         st.rerun()
         else:
-            st.info("No hay ubicaciones registradas todavía.")
+            st.info("Aún no has registrado ninguna ubicación.")
+
+
+
+
+
+            #--- HISTORIAL ELIMINADOS ---
 
 elif menu == "HISTORIAL ELIMINADOS":
     st.title("🗑️ ACTIVOS ELIMINADOS")
