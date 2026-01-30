@@ -73,10 +73,10 @@ def visor_documento(path, nombre):
     else: st.info("**Vista previa solo disponible para archivos PDF.**")
     with open(path, "rb") as f: st.download_button("📥 DESCARGAR", f, file_name=nombre, key=f"dl_{path}")
 
-@st.dialog("CONFIRMAR ELIMINACIÓN DE ACTIVO")
+@st.dialog("ELIMINAR ACTIVO")
 def confirmar_eliminar_activo(activo_id):
     st.error(f"⚠️ ¿Desea eliminar permanentemente el activo **{activo_id}**?")
-    if st.button("SÍ, ELIMINAR", use_container_width=True):
+    if st.button("ELIMINAR", use_container_width=True):
         with conectar_db() as conn:
             res = conn.execute("SELECT ubicacion FROM activos WHERE id=?", (activo_id,)).fetchone()
             ubi_act = res[0] if res else "DESCONOCIDA"
@@ -90,7 +90,7 @@ def confirmar_eliminar_activo(activo_id):
 @st.dialog("ELIMINAR UBICACIÓN")
 def confirmar_eliminacion_ubi(nombre, pais):
     st.warning(f"¿Eliminar **{nombre}** en **{pais}**?")
-    if st.button("CONFIRMAR"):
+    if st.button("ELIMINAR"):
         with conectar_db() as conn:
             conn.execute("DELETE FROM ubicaciones WHERE nombre=? AND pais=?", (nombre, pais))
             conn.commit()
@@ -98,7 +98,7 @@ def confirmar_eliminacion_ubi(nombre, pais):
 
 @st.dialog("EDITAR UBICACIÓN")
 def editar_ubicacion_dialog(nombre_actual, pais_actual):
-    st.write(f"Modificando nombre de la ubicación en **{pais_actual}**")
+    st.write(f"Editar nombre de ubicación en **{pais_actual}**")
     nuevo_nombre = st.text_input("NUEVO NOMBRE", value=nombre_actual).upper()
     if st.button("GUARDAR CAMBIOS", use_container_width=True):
         if nuevo_nombre and nuevo_nombre != nombre_actual:
@@ -411,17 +411,17 @@ elif menu == "TRASLADOS":
         df_u = pd.read_sql_query("SELECT * FROM ubicaciones", conn)
         df_hist = pd.read_sql_query("SELECT * FROM historial ORDER BY fecha DESC", conn)
     
-    opais = st.selectbox("PAÍS ORIGEN", PAISES_LISTA)
+    opais = st.selectbox("**SELECCIONAR ORIGEN**", PAISES_LISTA)
     activos_f = activos[activos['pais'] == opais]
     
     if not activos_f.empty:
-        sel_id = st.selectbox("ACTIVO", activos_f['id'])
+        sel_id = st.selectbox("**SELECCIONAR ACTIVO**", activos_f['id'])
         curr = activos_f[activos_f['id'] == sel_id].iloc[0]
-        st.info(f"📍 Actual: {curr['pais']} - {curr['ubicacion']}")
-        tpais = st.selectbox("PAÍS DESTINO", PAISES_LISTA)
+        st.info(f"📍 Ubicación Actual: {curr['pais']} - {curr['ubicacion']}")
+        tpais = st.selectbox("**ELEGIR DESTINO**", PAISES_LISTA)
         u_dest_list = df_u[df_u['pais'] == tpais]['nombre'].tolist()
-        tubi = st.selectbox("UBICACIÓN DESTINO", u_dest_list if u_dest_list else ["SIN OPCIONES"])
-        mot = st.text_input("MOTIVO").upper()
+        tubi = st.selectbox("**UBICACIÓN DESTINO**", u_dest_list if u_dest_list else ["SIN OPCIONES"])
+        mot = st.text_input("**MOTIVO**").upper()
         if st.button("PROCESAR TRASLADO", use_container_width=True):
             if tubi != "SIN OPCIONES":
                 with conectar_db() as conn:
